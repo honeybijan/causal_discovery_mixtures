@@ -41,7 +41,40 @@ def find_adj_structure(n, data, k, eps = .01):
         sep_set_size +=1 
     return adjacency_matrix
 
-def find_adj_structure_hyp_test(n, data, k, p = .05):
+def count_pair_tests(n, k):
+    """Number of (A, B, Cond) agglomeration tests that could remove a given pair.
+
+    Mirrors the loop schedule of find_adj_structure_hyp_test on the complete
+    graph and counts the combinations that place the two endpoints on opposite
+    sides (one in A, the other in B). By symmetry this is the same for every
+    pair, so we count it once for the representative pair (0, 1).
+    """
+    lgk = int(np.log2(k) + 1)
+    max_s = n - 2 * lgk
+    if max_s < 0:
+        return 1
+    count = 0
+    for sep_set_size in range(0, max_s + 1):
+        for comb in itertools.combinations(range(n), 2 * lgk + sep_set_size):
+            if 0 not in comb or 1 not in comb:
+                continue
+            for A, comp in comb_and_comp(list(comb), lgk):
+                for B, Cond in comb_and_comp(comp, lgk):
+                    if (0 in A and 1 in B) or (1 in A and 0 in B):
+                        count += 1
+    return max(count, 1)
+
+
+def find_adj_structure_hyp_test(n, data, k, alpha=.05, correction=None, fwer=0.05):
+    # correction="bonferroni": ignore `alpha` and instead pick a removal
+    # threshold that accounts for how many tests each pair is subjected to.
+    # Removal happens when pval >= alpha, so to control the family-wise chance of
+    # spuriously separating a TRUE edge across its T tests we push the threshold
+    # toward 1: alpha_eff = 1 - fwer / T (larger T => more conservative removal).
+    if correction == "bonferroni":
+        T = count_pair_tests(n, k)
+        alpha = 1.0 - fwer / T
+        print("  [bonferroni] {} tests/pair -> removal threshold pval >= {:.5f}".format(T, alpha))
     adjacency_matrix = np.ones((n,n)) - np.diag(np.ones(n))
     degree = get_degree(adjacency_matrix)
     lgk = int(np.log2(k) + 1)
@@ -50,7 +83,7 @@ def find_adj_structure_hyp_test(n, data, k, p = .05):
         for comb in itertools.combinations(range(n), 2 * lgk + sep_set_size):
             for A, comp in comb_and_comp(list(comb), lgk):
                 for B, Cond in comb_and_comp(comp, lgk):
-                    if not (Rank_Adjacency_Hyp_Test(A, B, k, data, conditioning = Cond, p = p)):
+                    if not (Rank_Adjacency_Hyp_Test(A, B, k, data, conditioning = Cond, alpha = alpha)):
                         for i in A:
                             for j in B:
                                 adjacency_matrix[i,j] = 0

@@ -34,49 +34,26 @@ def effective_rank_SV(matrix, epsilon = .01):
   return len(big_enough)
 
 # Get covariance matrix of the matrix entries (used for hypothesis test)
-def get_sigma(matrix):
-  R, C = matrix.shape
-  cov = np.zeros((R*C, R*C))
-  for r1 in range(R):
-    for c1 in range(C):
-      for r2 in range(R):
-        for c2 in range(C):
-          p1 = matrix[r1, c1]
-          p2 = matrix[r2, c2]
-          if r1 == r2 and c1 == c2:
-            # Regular Bernouli cov
-            cov[c1 * R + r1, c2 * R + r2] = p1*(1 - p1)
-          else:
-            cov[c1 * R + r1, c2 * R + r2] = -p1 * p2
-  return cov
+# The rank-test primitives now live in the installable `probrank` package
+# (pip install probrank). We re-export them under their historical names so the
+# rest of this pipeline is unchanged.
+from probrank import (
+    empirical_matrix as get_matrix,
+    multinomial_covariance as get_sigma,
+    rank_pvalue as _rank_pvalue,
+)
 
-# Hypothesis rank test
+
 def hyp_rank_test(matrix, k, N):
-  sigma = get_sigma(matrix)
-  f = np.linalg.matrix_rank(sigma)
-  svd = np.linalg.svd(matrix, full_matrices=True, compute_uv=True)
-  S = svd.S
-  d = len(S)
-  U2 = svd.U[:,-(d-k):]
-  V2= svd.Vh.transpose()[:, -(d-k):]
-  L = np.diag(S[-(d-k):])
-  l = L.flatten('F')
+  # Thin wrapper over probrank.rank_pvalue. A matrix with <= k rows or columns
+  # has rank <= k by construction (this can happen for a conditioned subset in
+  # which some category is unobserved), so it is trivially consistent with the
+  # low-rank/separation null; return a p-value of 1.0 rather than testing.
+  m, n = matrix.shape
+  if min(m, n) <= k:
+    return 1.0
+  return _rank_pvalue(matrix, k, N)
 
-  Q_dag = np.kron(V2.T, U2.T) @ np.linalg.pinv(sigma) @ np.kron(V2, U2)
-  stat = N * l.T @ Q_dag @ l
-  return sp.stats.chi2.sf(stat, f)
-
-def get_matrix(A, B, data):
-  N = len(data)
-  data_t = np.transpose(data)
-  A_val_to_index = get_val_to_index(data_t[A])
-  B_val_to_index = get_val_to_index(data_t[B])
-  matrix = np.zeros((len(A_val_to_index.keys()), len(B_val_to_index.keys())))
-  for a, b in zip(np.transpose(data_t[A]), np.transpose(data_t[B])):
-    index_a = A_val_to_index[tuple(a)]
-    index_b = B_val_to_index[tuple(b)]
-    matrix[index_a][index_b] += 1
-  return matrix/N
 
 def Rank_Adjacency_Test(A, B, k, data, conditioning = [], epsilon = .01):
   if conditioning:
@@ -88,14 +65,19 @@ def Rank_Adjacency_Test(A, B, k, data, conditioning = [], epsilon = .01):
   matrix = get_matrix(A, B, data)
   return effective_rank_SV(matrix, epsilon=epsilon) > k
   
-def Rank_Adjacency_Hyp_Test(A, B, k, data, conditioning = [], p = .05):
+def Rank_Adjacency_Hyp_Test(A, B, k, data, conditioning = [], alpha = .05):
+  # Declares ADJACENCY (returns True) when we reject H0: rank<=k at level alpha,
+  # i.e. when pval < alpha. Non-adjacency (edge removed) when we fail to reject.
+  # NOTE: the old rule was `pval < 1 - p`, which only made sense because the
+  # previous (miscalibrated) test piled p-values near 1 under the null. With the
+  # corrected, calibrated hyp_rank_test the standard rule below is the right one.
   N = len(data)
   if conditioning:
     # Then try for each subset
     result = False
     for data_subset in Condition_Data(conditioning, data):
-      result = result or Rank_Adjacency_Hyp_Test(A, B, k, data_subset, p = p)
+      result = result or Rank_Adjacency_Hyp_Test(A, B, k, data_subset, alpha = alpha)
     return result
   matrix = get_matrix(A, B, data)
   pval = hyp_rank_test(matrix, k, N)
-  return  pval < 1 - p
+  return pval < alpha

@@ -1,0 +1,9 @@
+numpy>=1.25
+scipy>=1.10
+matplotlib>=3.7
+
+# The rank test itself is a separate, installable package (used by utils.py).
+probrank>=0.1.0
+
+# Optional: only needed for test2_compare_pc_fci.py (the PC / FCI baselines).
+causal-learn>=0.1.3
